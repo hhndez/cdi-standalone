@@ -103,6 +103,21 @@ tasks.withType(FindBugs) { task -> enabled = false
 
 task wrapper(type: Wrapper) { gradleVersion = '2.13' }
 
+task copyResources(type: Copy) {
+    println ("Copying...")
+    from "${projectDir}/src/main/resources"
+    into "${buildDir}/classes/main"
+}
+
+task execute(type:JavaExec) {
+    main = 'com.EntryPoint'
+    classpath = sourceSets.main.runtimeClasspath
+    if (System.getProperty("exec.args") != null)
+        args System.getProperty("exec.args").split()
+}
+
+execute.dependsOn copyResources
+
 processResources {
     description = 'Filtra los recursos de la aplicación de acuerdo al perfil indicado'
 
