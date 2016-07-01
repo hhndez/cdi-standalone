@@ -1,4 +1,6 @@
-package com.beans;
+package com.beans.impl;
+
+import com.beans.IUtilities;
 
 import javax.enterprise.inject.Alternative;
 
@@ -6,7 +8,7 @@ import javax.enterprise.inject.Alternative;
  * Created by hhernandez on 1/07/16.
  */
 @Alternative
-public class SuperUtilities implements IUtilities{
+public class SuperUtilities implements IUtilities {
 
     @Override
     public String getCurrentDate() {

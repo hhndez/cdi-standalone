@@ -1,4 +1,6 @@
-package com.beans;
+package com.beans.impl;
+
+import com.beans.IUtilities;
 
 import javax.annotation.PostConstruct;
 import javax.enterprise.inject.Alternative;
@@ -9,6 +11,7 @@ import static java.lang.System.out;
 /**
  * Created by hhernandez on 1/07/16.
  */
+
 @Alternative
 public class Utilities implements IUtilities {
 

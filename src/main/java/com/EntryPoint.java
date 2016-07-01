@@ -15,6 +15,7 @@ public class EntryPoint {
         Weld weld = new Weld();
         WeldContainer container = weld.initialize();
         Application application = container.instance().select(Application.class).get();
+//        MyBasicApplication application = container.instance().select(MyBasicApplication.class).get();
         application.run();
         weld.shutdown();
     }
