@@ -1,0 +1,225 @@
+import org.apache.tools.ant.filters.ReplaceTokens
+import groovy.util.ConfigObject;
+
+buildscript {
+    repositories {
+        maven {
+           name "Monet repository"
+           url "http://10.100.144.58:8081/artifactory/repo/"
+        }
+    }
+
+    dependencies {
+        classpath 'org.kt3k.gradle.plugin:coveralls-gradle-plugin:2.0.1'
+        classpath 'net.researchgate.bmv:gradle-release:2.4.5'
+        classpath 'com.bmv.gradle:bmv-delivery-plugin:0.1.0'
+    }
+}
+
+plugins {
+    id 'java'
+    id 'eclipse'
+    id 'idea'
+    id 'application'
+    id 'maven'
+    id 'findbugs'
+}
+
+apply from: "http://10.100.225.5:9090/gradlescripts/common-gradle/jacoco.gradle"
+apply from: "http://10.100.225.5:9090/gradlescripts/common-gradle/artifactPublication.gradle"
+apply from: "http://10.100.225.5:9090/gradlescripts/common-gradle/autodeploy.gradle"
+
+
+apply plugin: 'net.researchgate.release'
+apply plugin: 'com.bmv.delivery'
+ext {
+    minCoverageRates = [
+            'instruction' : 0,
+            'branch'      : 0,
+            'line'        : 0,
+            'complexity'  : 0,
+            'method'      : 0,
+            'class'       : 0
+    ]
+    coverageExclusions = ['com/bmv/core/InitApp.class']
+}
+
+javadoc {
+    failOnError = false
+}
+
+group = 'com.cdi-standalone'
+mainClassName = 'com.cdi-standalone.InitApp'
+description = "My application"
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+def loadContinuousDeliveryVersion() {
+    def cVersion = System.getProperty("continuousDeliveryVersion")
+    if (cVersion != null && !cVersion.toString().isEmpty()) {
+        return cVersion
+    } else {
+        def config = new ConfigSlurper().parse((new File("$projectDir/libVersions.groovy")).toURL())
+        return config.continuousDeliveryVersion
+    }
+}
+
+jar {
+    manifest {
+        attributes 'Implementation-Version': version
+    }
+    exclude '**/*.xml'
+    exclude '**/*.properties'
+    exclude '**/*.sh'
+    exclude 'bin'
+    exclude 'etc'
+    exclude 'launcher'
+}
+
+repositories {
+    jcenter()
+    maven {
+        name "BMV"
+        url "http://10.100.144.58:8081/artifactory/repo"
+    }        
+}
+
+dependencies {
+    compile group: 'org.jboss.weld.se', name: 'weld-se', version: '1.1.2.Final'
+    compile group: 'com.bmv', name: 'bmv-continuous-delivery', version: loadContinuousDeliveryVersion()
+    testCompile group: 'junit', name: 'junit', version:'4.8.1'
+}
+
+findbugsMain {
+    reports {
+        xml.enabled = false
+        html.enabled= true
+    }
+}
+
+tasks.withType(FindBugs) { task -> enabled = false
+}
+
+task wrapper(type: Wrapper) { gradleVersion = '2.13' }
+
+processResources {
+    description = 'Filtra los recursos de la aplicación de acuerdo al perfil indicado'
+
+    from "src/main/resources"
+    into "${buildDir}/resources/main"
+
+    readProfile.execute()
+    def ConfigObject config = readProfile.property("configObject")
+
+    if (config != null) {
+        def Map properties = config.flatten()
+        properties.put('version', version)
+        properties.put('versionWithoutDots', version.replace('.', '_'))
+        properties.put('mainClassName', mainClassName)
+        def password = System.getProperty('database.password')
+        if ( password != null && !"".equals(password.trim())) {
+            properties.put('environment.jdbc.database.password', System.getProperty('database.password'))
+        }
+        filter(ReplaceTokens, tokens: properties)
+    } else {
+        throw new InvalidUserDataException("No se ha encontrado las propiedades para el perfil '" + profileName + "'")
+    }
+}
+
+task makeDirStructure() << {
+    description = 'Prepara la estructura de archivos, para deploy local o remoto'
+    File distdir = new File("${buildDir}")
+    distdir.mkdir()
+    distdir = new File("${buildDir}/out/")
+    distdir.mkdir()
+    distdir = new File("${buildDir}/out/deploy")
+    distdir.mkdir()
+    distdir = new File("${buildDir}/out/" + version)
+    distdir.mkdir()
+    distdir = new File("${buildDir}/out/" + version + "/lib")
+    distdir.mkdir()
+}
+
+task copyResourcesToDistribution(type: Copy) {
+    from "${buildDir}/resources/main"
+    into "${buildDir}/out/" + version
+    include "**/*"
+    exclude "launcher"
+}
+
+task copyLibsToDistribution(type: Copy) {
+    from configurations.runtime
+    into "${buildDir}/out/" + version + "/lib"
+    include "**.jar"
+}
+
+task copyArtifactToDistribution(type: Copy) {
+    from "${buildDir}/libs"
+    into "${buildDir}/out/" + version + "/lib"
+}
+
+task moveToDeployHome(type: Copy) {
+    from "${buildDir}/out/" + version + "/"
+    include "**/*"
+    from "${buildDir}/out/" + version + "/"
+    exclude "appFiles"
+    exclude "install"
+    exclude "properties"
+    into "${buildDir}/deploy/" + version
+}
+
+task copyLauncher(type: Copy) {
+    from "${buildDir}/resources/main/launcher"
+    into "${buildDir}/deploy"
+    include "**/*"
+}
+
+task copyLauncher2(type: Copy) {
+    from "${buildDir}/resources/main/appFiles/"
+    into "${buildDir}/deploy/" + version
+    include "**/*"
+}
+
+task tarDistFile(type: Tar) {
+    def envProfile = System.getProperty("profile", "local")
+    from "${buildDir}/deploy/"
+    baseName applicationName + "-$envProfile"
+    compression Compression.GZIP
+    destinationDir "${buildDir}" as File
+}
+
+task zipDistFile(type: Zip) {
+    def envProfile = System.getProperty("profile", "local")
+    from "${buildDir}/deploy/"
+    baseName applicationName + "-$envProfile"
+    destinationDir "${buildDir}" as File
+}
+
+task buildDistribution(dependsOn: ['makeDirStructure', 'processResources' , 'build']) << {
+    copyResourcesToDistribution.copy()
+    moveToDeployHome.copy()
+    copyLauncher.copy()
+    copyLauncher2.copy()
+    tarDistFile.execute()
+    zipDistFile.execute()
+}
+
+task buildTarDistribution(dependsOn: ['makeDirStructure', 'processResources', 'build']) << {
+    copyResourcesToDistribution.copy()
+    moveToDeployHome.copy()
+    copyLauncher.copy()
+
+    tarDistFile.execute()
+}
+
+task buildDistributionIncludingLibs(dependsOn:['makeDirStructure', 'processResources' , 'build']) << {
+    copyResourcesToDistribution.copy()
+    copyLibsToDistribution.copy()
+    copyArtifactToDistribution.copy()
+    moveToDeployHome.copy()
+    copyLauncher.copy()
+    copyLauncher2.copy()
+    zipDistFile.execute()
+    tarDistFile.execute()
+}
